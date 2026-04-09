@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="LoaderTest/LoaderTest.vcxproj" Id="7708b9f4-faad-484f-a400-b67955d46d26" />
+  <Project Path="PELoader/PELoader.vcxproj" Id="0300990e-fe92-4b39-8f33-f5b2d3b8bbe4">
+    <BuildDependency Project="LoaderTest/LoaderTest.vcxproj" />
+  </Project>
+</Solution>
