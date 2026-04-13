@@ -4,7 +4,12 @@
 #include <Windows.h>
 namespace {
 
-    //TODO: add support for 32 bit PEs.
+    /*TODO: add support for 32 bit PEs.
+    * memory protection fixing
+    * TLS call backs
+    */
+
+
     /*
     struct PEInfo {
         DWORD       addressOfEntryPoint;
@@ -47,7 +52,7 @@ namespace {
 }
 */
 }
-bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint) {
+bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
 
     const PIMAGE_DOS_HEADER dosHeader{ reinterpret_cast<PIMAGE_DOS_HEADER>(peBuffer) };
     if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
@@ -78,20 +83,20 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint
 
     const uintptr_t sectionHeaderAddress{ reinterpret_cast<uintptr_t>(peBuffer + dosHeader->e_lfanew  + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + pNTHeader->FileHeader.SizeOfOptionalHeader)};
     
-    const LPVOID baseAddress{ VirtualAlloc(NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) };
+    LPVOID baseAddressAlloc{ VirtualAlloc(NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) };
 
-    if (baseAddress == NULL) {
+    if (baseAddressAlloc == NULL) {
         std::cerr << "VirtualAlloc failed: " << GetLastError() << '\n';
         return false;
     }
-
-    std::memcpy(baseAddress, peBuffer, pNTHeader->OptionalHeader.SizeOfHeaders);
+    unsigned char* baseAddress{ reinterpret_cast<unsigned char*>(baseAddressAlloc) };
+    std::memcpy(baseAddressAlloc, peBuffer, pNTHeader->OptionalHeader.SizeOfHeaders);
     
 
     for (DWORD sectionIndex{ 0 }; sectionIndex < numberOfSections; ++sectionIndex) {
         PIMAGE_SECTION_HEADER sectionHeader{ reinterpret_cast<PIMAGE_SECTION_HEADER>( sectionHeaderAddress + (sectionIndex * sizeof(IMAGE_SECTION_HEADER))) };
 
-        std::memcpy(reinterpret_cast<unsigned char*>(baseAddress) + sectionHeader->VirtualAddress, peBuffer + sectionHeader->PointerToRawData, sectionHeader->SizeOfRawData);
+        std::memcpy(reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), peBuffer + sectionHeader->PointerToRawData, sectionHeader->SizeOfRawData);
     }
     const IMAGE_DATA_DIRECTORY& relocDataDir{ pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC] };
 
@@ -101,8 +106,8 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint
     
     DWORD currentSize{ 0 };
     while (currentSize < relocDataDir.Size) {
-
-        PIMAGE_BASE_RELOCATION baseReloc{ reinterpret_cast<PIMAGE_BASE_RELOCATION>( (reinterpret_cast<unsigned char*>(baseAddress)) + (relocDataDir.VirtualAddress) + currentSize ) };
+       
+        PIMAGE_BASE_RELOCATION baseReloc{ reinterpret_cast<PIMAGE_BASE_RELOCATION>(baseAddress + pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress + currentSize) };
         currentSize += baseReloc->SizeOfBlock;
 
         DWORD numberOfRecords{ baseReloc->SizeOfBlock };
@@ -113,7 +118,7 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint
             uint16_t* relocEntry{ reinterpret_cast<uint16_t*>(reinterpret_cast<unsigned char*>(baseReloc) + sizeof(IMAGE_BASE_RELOCATION) + (i * sizeof(uint16_t)))};
             uint16_t relocType{ static_cast<uint16_t>(*relocEntry >> 12) }; // get upper 4 bits
             uint16_t relocRVA{ static_cast<uint16_t>(*relocEntry & 0xfff) }; // lower 12 bits give the rva
-            unsigned char* relocValue{ reinterpret_cast<unsigned char*>(baseAddress) + relocRVA };
+            unsigned char* relocValue{ baseAddress + baseReloc->VirtualAddress + relocRVA };
 
             switch (relocType) {
             case IMAGE_REL_BASED_LOW:
@@ -126,6 +131,7 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint
                 std::cout << "IMAGE_REL_BASED_HIGHLOW\n";
                 break;
             case IMAGE_REL_BASED_DIR64:
+                //std::cout << "IMAGE_REL_BASED_DIR64\n";
                 *reinterpret_cast<uint64_t*>(relocValue) += delta;
                 break;
             case IMAGE_REL_BASED_HIGHADJ:
@@ -133,8 +139,12 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint
                 i++;
                 break;
 
+            case IMAGE_REL_BASED_ABSOLUTE:
+                //std::cout << "IMAGE_REL_BASED_ABSOLUTE\n";
+                //nothing to do here
+                break;
             default:
-                std::cerr << "Invalid/Unsupported relocation type\n";
+                std::cerr << "Invalid/Unsupported relocation type: "<<relocType << "\n";
                 VirtualFree(baseAddress, 0, MEM_RELEASE);
                 return false;
                 break;
@@ -142,43 +152,57 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer, uintptr_t entryPoint
         }
     }
 
-    const IMAGE_IMPORT_DESCRIPTOR& pImportDirectoryEntry{ pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress };
-    IMAGE_IMPORT_DESCRIPTOR* pImportDirectoryEntry = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(importDirectoryTable);
-    while (pImportDirectoryEntry->Characteristics) {
-        struct ImportTable importTablestruct;
+    auto importDirAddress{ baseAddress + pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress };
 
-        importTablestruct.dllName = reinterpret_cast<char*>(base + pImportDirectoryEntry->Name);
-        importTablestruct.iatOffset = pImportDirectoryEntry->FirstThunk;
+    PIMAGE_IMPORT_DESCRIPTOR pImportDirectoryEntry{ reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(importDirAddress) };
+    PIMAGE_THUNK_DATA importAddressTable{ reinterpret_cast<PIMAGE_THUNK_DATA>(baseAddress + pImportDirectoryEntry->FirstThunk) };
 
-        if (peType == PEType::PE64) {
-            uint64_t* pImportLookupTable = reinterpret_cast<uint64_t*>(base + pImportDirectoryEntry->Characteristics);
-            int index = 0;
-            uint64_t iltEntry{ pImportLookupTable[index] };
-            while (iltEntry != 0) {
-                if (!(IMAGE_ORDINAL_FLAG64 & iltEntry)) {
-                    importTablestruct.functionData.emplace_back(reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + iltEntry));
-                }
-                index++;
-                iltEntry = pImportLookupTable[index];
-            }
+    for (; pImportDirectoryEntry->OriginalFirstThunk;  pImportDirectoryEntry++) {
 
+        char* dllName = reinterpret_cast<char*>(baseAddress + pImportDirectoryEntry->Name);
+
+        HMODULE hDll{ LoadLibraryA(dllName) };
+
+        if (!hDll) {
+            std::cerr << "Failed to load library: " << dllName << " : " << GetLastError();
+            VirtualFree(baseAddress, 0, MEM_RELEASE);
+            return false;
         }
-        else {
-            uint32_t* pImportLookupTable = reinterpret_cast<uint32_t*>(base + pImportDirectoryEntry->Characteristics);
-            int index = 0;
-            uint32_t iltEntry{ pImportLookupTable[index] };
-            while (iltEntry != 0) {
-                if (!(IMAGE_ORDINAL_FLAG64 & iltEntry)) {
-                    importTablestruct.functionData.emplace_back(reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + iltEntry));
-                }
-                index++;
-                iltEntry = pImportLookupTable[index];
+        PIMAGE_THUNK_DATA pImportLookupTable = reinterpret_cast<PIMAGE_THUNK_DATA>(baseAddress + pImportDirectoryEntry->OriginalFirstThunk);
+        PIMAGE_THUNK_DATA pImportAddressTable{ reinterpret_cast<PIMAGE_THUNK_DATA>(baseAddress + pImportDirectoryEntry->FirstThunk) };
+        int index = 0;
+        auto iltEntry{ pImportLookupTable[index] };
+        while (iltEntry.u1.AddressOfData) {
+            if (IMAGE_ORDINAL_FLAG64 & iltEntry.u1.Ordinal) {
+                char* ordinal{ reinterpret_cast<char*>(IMAGE_ORDINAL(iltEntry.u1.Ordinal)) };
+                pImportAddressTable[index].u1.Function = reinterpret_cast<ULONGLONG>(GetProcAddress(hDll, ordinal)); //TODO: check errors
             }
+            else {  
+                char* funcName{ reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(baseAddress + iltEntry.u1.AddressOfData)->Name };
+                pImportAddressTable[index].u1.Function = reinterpret_cast<ULONGLONG>(GetProcAddress(hDll, funcName));
+
+            }
+            index++;
+            iltEntry = pImportLookupTable[index];
         }
-        pImportDirectoryEntry++;
-        importTable.emplace_back(importTablestruct);
     }
+    
 
+    using DLLEntry = BOOL (WINAPI*)(HINSTANCE, DWORD, LPVOID);
+
+    using EXEEntry = void(WINAPI*)(void);
+
+    auto entryPoint{ baseAddress + pNTHeader->OptionalHeader.AddressOfEntryPoint };
+
+    if (pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
+        DLLEntry dllEntry{ reinterpret_cast<DLLEntry>(entryPoint) };
+        dllEntry(reinterpret_cast<HINSTANCE>(baseAddress), DLL_PROCESS_ATTACH, NULL);
+    }
+    else {
+        EXEEntry exeEntry{ reinterpret_cast<EXEEntry>(entryPoint) };
+
+        exeEntry();
+    }
 
     return true;
 }
@@ -204,12 +228,13 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    uintptr_t entryPoint{ 0 };
+    //uintptr_t entryPoint{ 0 };
 
-    if (!loadPE(bytes.data(), bytes.size(), entryPoint)) {
+    if (!loadPE(bytes.data(), bytes.size())) {
         std::cerr << "Failed loading the PE\n";
         return EXIT_FAILURE;
     }
-
-    std::cout << "Successfully loaded the PE\n";
+    std::cout << "Successfully loaded the PE\nPress Enter to continue:";
+    char c;
+    std::cin >> c;
 }
