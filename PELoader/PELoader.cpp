@@ -2,57 +2,13 @@
 #include <filesystem>
 #include <fstream>
 #include <Windows.h>
-namespace {
 
-    /*TODO: add support for 32 bit PEs.
-    * memory protection fixing
-    * TLS call backs
-    */
-
-
-    /*
-    struct PEInfo {
-        DWORD       addressOfEntryPoint;
-        ULONGLONG   imageBase;
-        DWORD       sectionAlignment;
-        DWORD       fileAlignment;
-        DWORD       sizeOfImage;
-        DWORD       sizeOfHeaders;
-        DWORD       numberOfRvaAndSizes;
-        IMAGE_DATA_DIRECTORY dataDirectory[IMAGE_NUMBEROF_DIRECTORY_ENTRIES];
-    };
-
-    template <typename T>
-    PEInfo getPEInfoData(T optionalHeader) {
-        PEInfo info{};
-
-        info.addressOfEntryPoint = optionalHeader.AddressOfEntryPoint;
-        info.imageBase = optionalHeader.ImageBase;
-        info.sectionAlignment = optionalHeader.SectionAlignment;
-        info.fileAlignment = optionalHeader.FileAlignment;
-        info.sizeOfImage = optionalHeader.SizeOfImage;
-        info.sizeOfHeaders = optionalHeader.SizeOfHeaders;
-        info.numberOfRvaAndSizes = optionalHeader.NumberOfRvaAndSizes;
-
-        std::memcpy(
-            info.dataDirectory,
-            optionalHeader.DataDirectory,
-            sizeof(IMAGE_DATA_DIRECTORY) * optionalHeader.NumberOfRvaAndSizes
-        );
-
-        return info;
-    }
-
-    PEInfo getPEInfo(PIMAGE_NT_HEADERS32 pNTHeader, bool isPE32) {
-        if (isPE32) {
-            return getPEInfoData(pNTHeader->OptionalHeader);
-        }
-        return getPEInfoData(reinterpret_cast<PIMAGE_NT_HEADERS64>(pNTHeader)->OptionalHeader);
-    }
-}
+/*TODO: add support for 32 bit PEs.
+* memory protection fixing
+* TLS call backs
 */
-}
-bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
+
+bool loadPE(unsigned char* peBuffer) {
 
     const PIMAGE_DOS_HEADER dosHeader{ reinterpret_cast<PIMAGE_DOS_HEADER>(peBuffer) };
     if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
@@ -69,15 +25,33 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
         return false;
     }
 
-
     const WORD* bitType = reinterpret_cast<WORD*>(&(pNTHeader->OptionalHeader));
 
-    if (*bitType != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+    if (*bitType != IMAGE_NT_OPTIONAL_HDR64_MAGIC && *bitType != IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
         std::cerr << "Unsupported PE\n";
         return false;
     }
 
+    bool is64Bit{ false };
+    USHORT processMachine{ 0 };
+    USHORT nativeMachine{ 0 };
+    if (!IsWow64Process2(GetCurrentProcess(), &processMachine, &nativeMachine)) {
+        std::cerr << "Could not retrive bitness of current process: " << GetLastError();
+        return false;
+    }
+    if (nativeMachine != IMAGE_FILE_MACHINE_AMD64) {
+        std::cerr << "Invalid native machine type detected";
+        return false;
+    }
 
+    if (processMachine == IMAGE_FILE_MACHINE_UNKNOWN) {
+        is64Bit = true;
+    }
+
+    if ((*bitType == IMAGE_NT_OPTIONAL_HDR64_MAGIC && !is64Bit) || (*bitType == IMAGE_NT_OPTIONAL_HDR32_MAGIC && is64Bit)) {
+        std::cerr << "Invalid PE type provided\n";
+        return false;
+    }
 
     WORD numberOfSections{ pNTHeader->FileHeader.NumberOfSections };
 
@@ -131,7 +105,6 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
                 std::cout << "IMAGE_REL_BASED_HIGHLOW\n";
                 break;
             case IMAGE_REL_BASED_DIR64:
-                //std::cout << "IMAGE_REL_BASED_DIR64\n";
                 *reinterpret_cast<uint64_t*>(relocValue) += delta;
                 break;
             case IMAGE_REL_BASED_HIGHADJ:
@@ -140,7 +113,6 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
                 break;
 
             case IMAGE_REL_BASED_ABSOLUTE:
-                //std::cout << "IMAGE_REL_BASED_ABSOLUTE\n";
                 //nothing to do here
                 break;
             default:
@@ -175,11 +147,23 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
         while (iltEntry.u1.AddressOfData) {
             if (IMAGE_ORDINAL_FLAG64 & iltEntry.u1.Ordinal) {
                 char* ordinal{ reinterpret_cast<char*>(IMAGE_ORDINAL(iltEntry.u1.Ordinal)) };
-                pImportAddressTable[index].u1.Function = reinterpret_cast<ULONGLONG>(GetProcAddress(hDll, ordinal)); //TODO: check errors
+                auto procAddress{ GetProcAddress(hDll, ordinal) };
+                if (!procAddress) {
+                    std::cerr << "GetProcAddress failed: " << GetLastError() << '\n';
+                    VirtualFree(baseAddress, 0, MEM_RELEASE);
+                    return false;
+                }
+                pImportAddressTable[index].u1.Function = reinterpret_cast<ULONGLONG>(procAddress);
             }
             else {  
                 char* funcName{ reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(baseAddress + iltEntry.u1.AddressOfData)->Name };
-                pImportAddressTable[index].u1.Function = reinterpret_cast<ULONGLONG>(GetProcAddress(hDll, funcName));
+                auto procAddress{ GetProcAddress(hDll, funcName) };
+                if (!procAddress) {
+                    std::cerr << "GetProcAddress failed: " << GetLastError() << '\n';
+                    VirtualFree(baseAddress, 0, MEM_RELEASE);
+                    return false;
+                }
+                pImportAddressTable[index].u1.Function = reinterpret_cast<ULONGLONG>(procAddress);
 
             }
             index++;
@@ -206,7 +190,9 @@ bool loadPE(unsigned char* peBuffer, size_t sizeOfPEBuffer) {
 
     return true;
 }
+
 int main(int argc, char* argv[]) {
+
     if (argc != 2) {
         std::cerr << "Usage:\n\t" << argv[0] << " <pe_path>\n";
         return EXIT_FAILURE;
@@ -228,9 +214,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    //uintptr_t entryPoint{ 0 };
-
-    if (!loadPE(bytes.data(), bytes.size())) {
+    if (!loadPE(bytes.data())) {
         std::cerr << "Failed loading the PE\n";
         return EXIT_FAILURE;
     }
