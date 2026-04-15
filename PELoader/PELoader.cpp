@@ -3,7 +3,7 @@
 #include <fstream>
 #include <Windows.h>
 
-/*TODO: add support for 32 bit PEs.
+/*TODO:
 * memory protection fixing
 * TLS call backs
 */
@@ -96,22 +96,18 @@ bool loadPE(unsigned char* peBuffer) {
 
             switch (relocType) {
             case IMAGE_REL_BASED_LOW:
-                std::cout << "IMAGE_REL_BASED_LOW\n";
+                *reinterpret_cast<uint16_t*>(relocValue) += LOWORD(delta);
                 break;
             case IMAGE_REL_BASED_HIGH:
-                std::cout << "IMAGE_REL_BASED_HIGH\n";
+                *reinterpret_cast<uint16_t*>(relocValue) += HIWORD(delta);
                 break;
             case IMAGE_REL_BASED_HIGHLOW:
-                std::cout << "IMAGE_REL_BASED_HIGHLOW\n";
+                *reinterpret_cast<uint32_t*>(relocValue) += static_cast<uint32_t>(delta);
                 break;
+            
             case IMAGE_REL_BASED_DIR64:
                 *reinterpret_cast<uint64_t*>(relocValue) += delta;
                 break;
-            case IMAGE_REL_BASED_HIGHADJ:
-                std::cout << "IMAGE_REL_BASED_HIGHADJ\n";
-                i++;
-                break;
-
             case IMAGE_REL_BASED_ABSOLUTE:
                 //nothing to do here
                 break;
@@ -145,7 +141,7 @@ bool loadPE(unsigned char* peBuffer) {
         int index = 0;
         auto iltEntry{ pImportLookupTable[index] };
         while (iltEntry.u1.AddressOfData) {
-            if (IMAGE_ORDINAL_FLAG64 & iltEntry.u1.Ordinal) {
+            if (IMAGE_ORDINAL_FLAG & iltEntry.u1.Ordinal) {
                 char* ordinal{ reinterpret_cast<char*>(IMAGE_ORDINAL(iltEntry.u1.Ordinal)) };
                 auto procAddress{ GetProcAddress(hDll, ordinal) };
                 if (!procAddress) {
