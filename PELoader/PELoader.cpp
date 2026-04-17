@@ -4,7 +4,6 @@
 #include <Windows.h>
 
 /*TODO:
-* memory protection fixing
 * TLS call backs
 */
 
@@ -71,6 +70,12 @@ bool loadPE(unsigned char* peBuffer) {
         PIMAGE_SECTION_HEADER sectionHeader{ reinterpret_cast<PIMAGE_SECTION_HEADER>( sectionHeaderAddress + (sectionIndex * sizeof(IMAGE_SECTION_HEADER))) };
 
         std::memcpy(reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), peBuffer + sectionHeader->PointerToRawData, sectionHeader->SizeOfRawData);
+        DWORD oldFlags{ 0 };
+
+        if (sectionHeader->Characteristics & IMAGE_SCN_CNT_CODE || sectionHeader->Characteristics & IMAGE_SCN_MEM_EXECUTE) {
+            VirtualProtect(reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), sectionHeader->SizeOfRawData, PAGE_EXECUTE_READWRITE, &oldFlags);
+        }
+        
     }
     const IMAGE_DATA_DIRECTORY& relocDataDir{ pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC] };
 
