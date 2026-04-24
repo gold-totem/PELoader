@@ -1,6 +1,7 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <Windows.h>
 #include "PELoader.h"
 
 int main(int argc, char* argv[]) {
@@ -25,11 +26,17 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to read file\n";
         return EXIT_FAILURE;
     }
-
-    if (!loadPE(bytes.data())) {
+    PELdr::PELoader peLoader;
+    if (!peLoader.loadPE(GetCurrentProcess(), bytes.data())) {
         std::cerr << "Failed loading the PE\n";
         return EXIT_FAILURE;
     }
+
+    if (!peLoader.callEntry()) {
+        std::cerr << "Failed executing the PE\n";
+        return EXIT_FAILURE;
+    }
+
     std::cout << "Successfully loaded the PE\n";
     return EXIT_SUCCESS;
 }
