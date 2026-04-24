@@ -1,5 +1,5 @@
 #include "pch.h"
-
+#include "PELoader.h"
 namespace {
     bool relocateImage(unsigned char* baseAddress, const PIMAGE_NT_HEADERS pNTHeader) {
 
@@ -111,34 +111,17 @@ namespace {
         }
         return true;
     }
-    bool callEntry(unsigned char* baseAddress, const PIMAGE_NT_HEADERS pNTHeader) {
-        using DLLEntry = BOOL(WINAPI*)(HINSTANCE, DWORD, LPVOID);
-
-        using EXEEntry = void(WINAPI*)(void);
-
-        auto entryPoint{ baseAddress + pNTHeader->OptionalHeader.AddressOfEntryPoint };
-
-        if (pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
-            DLLEntry dllEntry{ reinterpret_cast<DLLEntry>(entryPoint) };
-            dllEntry(reinterpret_cast<HINSTANCE>(baseAddress), DLL_PROCESS_ATTACH, NULL);
-        }
-        else {
-            EXEEntry exeEntry{ reinterpret_cast<EXEEntry>(entryPoint) };
-
-            exeEntry();
-        }
-        return true;
-    }
+  
 }
 
-bool loadPE(unsigned char* peBuffer) {
+bool PELdr::PELoader::loadPE(HANDLE hProc, unsigned char* peBuffer) {
 
     const PIMAGE_DOS_HEADER dosHeader{ reinterpret_cast<PIMAGE_DOS_HEADER>(peBuffer) };
     if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
         std::cerr << "Invalid PE provided\n";
         return false;
     }
-    const PIMAGE_NT_HEADERS pNTHeader{ reinterpret_cast<PIMAGE_NT_HEADERS>(peBuffer + dosHeader->e_lfanew) };
+    pNTHeader =  reinterpret_cast<PIMAGE_NT_HEADERS>(peBuffer + dosHeader->e_lfanew);
     if (pNTHeader->Signature != IMAGE_NT_SIGNATURE) {
         std::cerr << "Invalid PE provided\n";
         return false;
@@ -180,13 +163,13 @@ bool loadPE(unsigned char* peBuffer) {
 
     const uintptr_t sectionHeaderAddress{ reinterpret_cast<uintptr_t>(peBuffer + dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + pNTHeader->FileHeader.SizeOfOptionalHeader) };
 
-    LPVOID baseAddressAlloc{ VirtualAlloc(NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) };
-
+    LPVOID baseAddressAlloc{ VirtualAllocEx( hProc, NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) };
+     
     if (baseAddressAlloc == NULL) {
-        std::cerr << "VirtualAlloc failed: " << GetLastError() << '\n';
+        std::cerr << "VirtualAllocEx failed: " << GetLastError() << '\n';
         return false;
     }
-    unsigned char* baseAddress{ reinterpret_cast<unsigned char*>(baseAddressAlloc) };
+    baseAddress = reinterpret_cast<unsigned char*>(baseAddressAlloc);
 
     std::memcpy(baseAddressAlloc, peBuffer, pNTHeader->OptionalHeader.SizeOfHeaders);
 
@@ -205,28 +188,36 @@ bool loadPE(unsigned char* peBuffer) {
 
     if (!relocateImage(baseAddress, pNTHeader)) {
         std::cerr << "Image relocation failed\n";
-        VirtualFree(baseAddress, 0, MEM_RELEASE);
         return false;
     }
 
     if (!resolveIAT(baseAddress, pNTHeader)) {
         std::cerr << "Resolving imports failed\n";
-        VirtualFree(baseAddress, 0, MEM_RELEASE);
         return false;
     }
 
     if (!tlsCallbacks(baseAddress, pNTHeader)) {
         std::cerr << "TLS callbacks failed\n";
-        VirtualFree(baseAddress, 0, MEM_RELEASE);
         return false;
     }
 
+    return true;
+}
+bool PELdr::PELoader::callEntry() {
+    using DLLEntry = BOOL(WINAPI*)(HINSTANCE, DWORD, LPVOID);
 
-    if (!callEntry(baseAddress, pNTHeader)) {
-        std::cerr << "Invoking entry point failed\n";
-        VirtualFree(baseAddress, 0, MEM_RELEASE);
-        return false;
+    using EXEEntry = void(WINAPI*)(void);
+
+    auto entryPoint{ baseAddress + pNTHeader->OptionalHeader.AddressOfEntryPoint };
+
+    if (pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
+        DLLEntry dllEntry{ reinterpret_cast<DLLEntry>(entryPoint) };
+        dllEntry(reinterpret_cast<HINSTANCE>(baseAddress), DLL_PROCESS_ATTACH, NULL);
     }
+    else {
+        EXEEntry exeEntry{ reinterpret_cast<EXEEntry>(entryPoint) };
 
+        exeEntry();
+    }
     return true;
 }
