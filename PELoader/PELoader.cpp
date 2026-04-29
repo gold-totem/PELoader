@@ -27,6 +27,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     PELdr::PELoader peLoader;
+
     if (!peLoader.loadPE(GetCurrentProcess(), bytes.data())) {
         std::cerr << "Failed loading the PE\n";
         return EXIT_FAILURE;

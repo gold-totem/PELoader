@@ -1,11 +1,12 @@
+#include <vector>
 #include "pch.h"
 #include "PELoader.h"
 namespace {
-    bool relocateImage(unsigned char* baseAddress, const PIMAGE_NT_HEADERS pNTHeader) {
+    bool relocateImage(unsigned char* baseAddress, const PIMAGE_NT_HEADERS pNTHeader, uintptr_t delta) {
 
 
         const IMAGE_DATA_DIRECTORY& relocDataDir{ pNTHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC] };
-        uintptr_t delta{ reinterpret_cast<uintptr_t>(baseAddress) - pNTHeader->OptionalHeader.ImageBase };
+        //uintptr_t delta{ reinterpret_cast<uintptr_t>(baseAddress) - pNTHeader->OptionalHeader.ImageBase };
 
         DWORD currentSize{ 0 };
         while (currentSize < relocDataDir.Size) {
@@ -114,13 +115,18 @@ namespace {
   
 }
 
-bool PELdr::PELoader::loadPE(HANDLE hProc, unsigned char* peBuffer) {
-
-    const PIMAGE_DOS_HEADER dosHeader{ reinterpret_cast<PIMAGE_DOS_HEADER>(peBuffer) };
+bool PELdr::PELoader::loadPE(HANDLE inpProc, unsigned char* peBuffer) {
+    if (!inpProc) {
+        std::cerr << "Invalid handle passed\n";
+        return false;
+    }
+    hProc = inpProc;
+    PIMAGE_DOS_HEADER dosHeader{ reinterpret_cast<PIMAGE_DOS_HEADER>(peBuffer) };
     if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
         std::cerr << "Invalid PE provided\n";
         return false;
     }
+
     pNTHeader =  reinterpret_cast<PIMAGE_NT_HEADERS>(peBuffer + dosHeader->e_lfanew);
     if (pNTHeader->Signature != IMAGE_NT_SIGNATURE) {
         std::cerr << "Invalid PE provided\n";
@@ -162,62 +168,94 @@ bool PELdr::PELoader::loadPE(HANDLE hProc, unsigned char* peBuffer) {
     const WORD numberOfSections{ pNTHeader->FileHeader.NumberOfSections };
 
     const uintptr_t sectionHeaderAddress{ reinterpret_cast<uintptr_t>(peBuffer + dosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + pNTHeader->FileHeader.SizeOfOptionalHeader) };
+    //buffer.resize(pNTHeader->OptionalHeader.SizeOfHeaders);
 
-    LPVOID baseAddressAlloc{ VirtualAllocEx( hProc, NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) };
-     
+    buffer = VirtualAlloc(NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_COMMIT, PAGE_READWRITE);
+    //buffer.resize(1024);
+   
+
+   
+    //std::memcpy(baseAddressAlloc, peBuffer, pNTHeader->OptionalHeader.SizeOfHeaders);
+    //std::cout << buffer.data() << '\n';
+    std::memcpy(buffer, peBuffer, pNTHeader->OptionalHeader.SizeOfHeaders);
+    
+    for (DWORD sectionIndex{ 0 }; sectionIndex < numberOfSections; ++sectionIndex) {
+        PIMAGE_SECTION_HEADER sectionHeader{ reinterpret_cast<PIMAGE_SECTION_HEADER>(sectionHeaderAddress + (sectionIndex * sizeof(IMAGE_SECTION_HEADER))) };
+       
+        //std::memcpy(reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), peBuffer + sectionHeader->PointerToRawData, sectionHeader->SizeOfRawData);
+
+        std::memcpy(reinterpret_cast<void*>((unsigned char*)buffer + sectionHeader->VirtualAddress), peBuffer + sectionHeader->PointerToRawData, sectionHeader->SizeOfRawData);
+        DWORD oldFlags{ 0 };
+        /*
+        if (sectionHeader->Characteristics & IMAGE_SCN_CNT_CODE || sectionHeader->Characteristics & IMAGE_SCN_MEM_EXECUTE) {
+            if (!VirtualProtectEx(hProc, reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), sectionHeader->SizeOfRawData, PAGE_EXECUTE_READWRITE, &oldFlags)) {
+                std::cerr << "VirtualProtectEx failed: " << GetLastError() << '\n';
+                return false;
+            }
+        }
+        */
+
+    }
+
+    
+    LPVOID baseAddressAlloc{ VirtualAllocEx(hProc, NULL, pNTHeader->OptionalHeader.SizeOfImage, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) };
+  
     if (baseAddressAlloc == NULL) {
         std::cerr << "VirtualAllocEx failed: " << GetLastError() << '\n';
         return false;
     }
     baseAddress = reinterpret_cast<unsigned char*>(baseAddressAlloc);
 
-    std::memcpy(baseAddressAlloc, peBuffer, pNTHeader->OptionalHeader.SizeOfHeaders);
+    delta = reinterpret_cast<uintptr_t>(baseAddress) - pNTHeader->OptionalHeader.ImageBase;
 
-
-    for (DWORD sectionIndex{ 0 }; sectionIndex < numberOfSections; ++sectionIndex) {
-        PIMAGE_SECTION_HEADER sectionHeader{ reinterpret_cast<PIMAGE_SECTION_HEADER>(sectionHeaderAddress + (sectionIndex * sizeof(IMAGE_SECTION_HEADER))) };
-
-        std::memcpy(reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), peBuffer + sectionHeader->PointerToRawData, sectionHeader->SizeOfRawData);
-        DWORD oldFlags{ 0 };
-
-        if (sectionHeader->Characteristics & IMAGE_SCN_CNT_CODE || sectionHeader->Characteristics & IMAGE_SCN_MEM_EXECUTE) {
-            VirtualProtect(reinterpret_cast<void*>(baseAddress + sectionHeader->VirtualAddress), sectionHeader->SizeOfRawData, PAGE_EXECUTE_READWRITE, &oldFlags);
-        }
-
-    }
-
-    if (!relocateImage(baseAddress, pNTHeader)) {
+    if (!relocateImage((unsigned char*)buffer, pNTHeader, delta)) {
         std::cerr << "Image relocation failed\n";
         return false;
     }
-
-    if (!resolveIAT(baseAddress, pNTHeader)) {
+  
+    if (!resolveIAT((unsigned char*)buffer, pNTHeader)) {
         std::cerr << "Resolving imports failed\n";
         return false;
     }
-
-    if (!tlsCallbacks(baseAddress, pNTHeader)) {
+   
+    if (!tlsCallbacks((unsigned char*)buffer, pNTHeader)) {
         std::cerr << "TLS callbacks failed\n";
         return false;
     }
-
+   
+    
+    SIZE_T numBytesWritten{ 0 };
+    if (!WriteProcessMemory(hProc, baseAddressAlloc, buffer, pNTHeader->OptionalHeader.SizeOfImage, &numBytesWritten)) {
+        std::cerr << "WriteProcessMemory failed: " << GetLastError() << '\n';
+        return false;
+    }
+    std::cout << "pNTHeader->OptionalHeader.SizeOfImage: " << pNTHeader->OptionalHeader.SizeOfImage << '\n';
+    std::cout << "numBytesWritten: " << numBytesWritten << '\n';
     return true;
+
 }
 bool PELdr::PELoader::callEntry() {
     using DLLEntry = BOOL(WINAPI*)(HINSTANCE, DWORD, LPVOID);
 
     using EXEEntry = void(WINAPI*)(void);
 
-    auto entryPoint{ baseAddress + pNTHeader->OptionalHeader.AddressOfEntryPoint };
+    auto entryPoint{ (unsigned char*)buffer + pNTHeader->OptionalHeader.AddressOfEntryPoint };
 
     if (pNTHeader->FileHeader.Characteristics & IMAGE_FILE_DLL) {
         DLLEntry dllEntry{ reinterpret_cast<DLLEntry>(entryPoint) };
-        dllEntry(reinterpret_cast<HINSTANCE>(baseAddress), DLL_PROCESS_ATTACH, NULL);
+        dllEntry(reinterpret_cast<HINSTANCE>(buffer), DLL_PROCESS_ATTACH, NULL);
+
+        
     }
     else {
-        EXEEntry exeEntry{ reinterpret_cast<EXEEntry>(entryPoint) };
 
-        exeEntry();
+        HANDLE hThread = CreateRemoteThread(hProc, NULL, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(entryPoint + delta ), NULL, 0, NULL);
+        if (!hThread) {
+            std::cerr << "CreateRemoteThread failed: " << GetLastError() << '\n';
+            VirtualFree(baseAddress, 0, MEM_RELEASE);
+            return false;
+        }
+        WaitForSingleObject(hThread, INFINITE);
     }
     return true;
 }
