@@ -2,12 +2,12 @@
 #include <filesystem>
 #include <fstream>
 #include <Windows.h>
-#include "PELoader.h"
+#include "DllLoader.h"
 
 int main(int argc, char* argv[]) {
 
     if (argc != 2) {
-        std::cerr << "Usage:\n\t" << argv[0] << " <pe_path>\n";
+        std::cerr << "Usage:\n\t" << argv[0] << " <dll_path>\n";
         return EXIT_FAILURE;
     }
     std::ifstream file(argv[1], std::ios::binary);
@@ -30,30 +30,32 @@ int main(int argc, char* argv[]) {
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION victimProcInfo{ 0 };
-    if (!CreateProcessW(L"C:\\Windows\\System32\\notepad.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &victimProcInfo)) {
+    if (!CreateProcessW(L"D:\\workspace\\VSRepos\\Learning\\PELoader\\x64\\Release\\hello.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &victimProcInfo)) {
         std::cerr << "Victim process creation failed: " << GetLastError() << '\n';
         return EXIT_FAILURE;
     }
-
-    HANDLE hProcess{ OpenProcess(PROCESS_ALL_ACCESS, false, victimProcInfo.dwProcessId) };
+    DWORD pid;
+    std::cout << "Enter Pid: ";
+    //std::cin >> pid;
+    HANDLE hProcess{ OpenProcess(PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION , false, victimProcInfo.dwProcessId) };
 
     if (!hProcess) {
         std::cerr << "OpenProcessfailed: " << GetLastError() << '\n';
         return EXIT_FAILURE;
     }
 
-    PELdr::PELoader peLoader;
-
-    if (!peLoader.loadPE(GetCurrentProcess(), bytes.data())) {
-        std::cerr << "Failed loading the PE\n";
+    LoadDLL::DllLoader DllLoader;
+    std::cout << "loading the DLL\n";
+    if (!DllLoader.loadDLL(hProcess, bytes.data(), "sayHello")) {
+        std::cerr << "Failed loading the DLL\n";
         return EXIT_FAILURE;
     }
 
-    if (!peLoader.callEntry()) {
-        std::cerr << "Failed executing the PE\n";
-        return EXIT_FAILURE;
+    std::cout << "Successfully loaded the DLL\n";
+    char c;
+    //std::cin >> c;
+    if (!TerminateProcess(hProcess, EXIT_SUCCESS)) {
+        std::cerr << "Terminate process failed: " << GetLastError() << '\n';
     }
-
-    std::cout << "Successfully loaded the PE\n";
     return EXIT_SUCCESS;
 }

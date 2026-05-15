@@ -1,6 +1,9 @@
 #include "pch.h"
 #include <windows.h>
 
+__declspec(dllexport) void __cdecl sayHello() {
+    MessageBox(NULL, L"Hi", L"Hello", MB_OK);
+}
 
 //https://stackoverflow.com/questions/14538159/tls-callback-in-windows
 
