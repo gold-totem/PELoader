@@ -1,19 +1,15 @@
 #pragma once
 #include <vector>
+#include <optional>
 namespace PELdr {
 	class PELoader {
 	public:
 		bool loadPE(HANDLE hProc, unsigned char* peBuffer);
 		bool callEntry();
-
-		~PELoader() {
-			if (baseAddress) {
-				//VirtualFree(baseAddress, 0, MEM_RELEASE);
-			}
-		}
-	//private:
-		//std::vector<unsigned char> buffer;
-		PVOID buffer{ nullptr };
+		bool callExport(std::string_view funcName);
+	private:
+		
+		unsigned char* localBuffer{ nullptr };
 		HANDLE hProc{ nullptr };
 		unsigned char* baseAddress{ nullptr };
 		PIMAGE_NT_HEADERS pNTHeader{ nullptr };

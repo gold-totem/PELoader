@@ -26,22 +26,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to read file\n";
         return EXIT_FAILURE;
     }
-
-    STARTUPINFOW si = {};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION victimProcInfo{ 0 };
-    if (!CreateProcessW(L"C:\\Windows\\System32\\notepad.exe", NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &victimProcInfo)) {
-        std::cerr << "Victim process creation failed: " << GetLastError() << '\n';
-        return EXIT_FAILURE;
-    }
-
-    HANDLE hProcess{ OpenProcess(PROCESS_ALL_ACCESS, false, victimProcInfo.dwProcessId) };
-
-    if (!hProcess) {
-        std::cerr << "OpenProcessfailed: " << GetLastError() << '\n';
-        return EXIT_FAILURE;
-    }
-
     PELdr::PELoader peLoader;
 
     if (!peLoader.loadPE(GetCurrentProcess(), bytes.data())) {

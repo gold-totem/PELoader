@@ -1,7 +1,7 @@
 #include "pch.h"
 #include <windows.h>
 
-__declspec(dllexport) void __cdecl sayHello() {
+extern "C" __declspec(dllexport) void __cdecl sayHello() {
     MessageBox(NULL, L"Hi", L"Hello", MB_OK);
 }
 

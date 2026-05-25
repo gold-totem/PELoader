@@ -2,7 +2,6 @@
 #include <iostream>
 int main() {
 
-	if (!MessageBox(NULL, L"The executable has been loaded successfully.", L"Success", MB_OK)) {
-		std::cerr << "Error using MessageBox: " << GetLastError() << '\n';
-	}
+	if (!MessageBox(NULL, L"The executable has been loaded successfully.", L"Success", MB_OK)) std::cerr << "Error using MessageBox: " << GetLastError() << '\n';
+	//std::cout << "Injected\n";
 }
