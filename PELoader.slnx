@@ -14,5 +14,4 @@
   <Project Path="D:/workspace/VSRepos/Learning/PELoader/PERemoteLoader/PERemoteLoader.vcxproj" Id="8307f221-cc80-4fa7-93fd-e403bff582ba">
     <BuildDependency Project="D:/workspace/VSRepos/Learning/PELoader/LibPELoader/LibPELoader.vcxproj" />
   </Project>
-  <Project Path="hello/hello.vcxproj" Id="27144fd2-1f28-4666-b368-befcbe763810" />
 </Solution>
