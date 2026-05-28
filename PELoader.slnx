@@ -12,6 +12,9 @@
     <BuildDependency Project="D:/workspace/VSRepos/Learning/PELoader/LoaderTestDLL/LoaderTestDLL.vcxproj" />
   </Project>
   <Project Path="D:/workspace/VSRepos/Learning/PELoader/PERemoteLoader/PERemoteLoader.vcxproj" Id="8307f221-cc80-4fa7-93fd-e403bff582ba">
-    <BuildDependency Project="D:/workspace/VSRepos/Learning/PELoader/LibPELoader/LibPELoader.vcxproj" />
+    <BuildDependency Project="D:/workspace/VSRepos/Learning/PELoader/LoaderTest/LoaderTest.vcxproj" />
+    <BuildDependency Project="D:/workspace/VSRepos/Learning/PELoader/LoaderTestDLL/LoaderTestDLL.vcxproj" />
+    <BuildDependency Project="LibRemotePELoader/LibRemotePELoader.vcxproj" />
   </Project>
+  <Project Path="LibRemotePELoader/LibRemotePELoader.vcxproj" Id="1d0bb274-b0e6-461c-9a17-34aa1929f7b2" />
 </Solution>

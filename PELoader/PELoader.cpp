@@ -2,7 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <Windows.h>
-#include "PELoader.h"
+#include "InProcLoader.h"
 
 int main(int argc, char* argv[]) {
 
@@ -26,9 +26,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to read file\n";
         return EXIT_FAILURE;
     }
-    PELdr::PELoader peLoader;
+    PELdr::InProcLoader peLoader;
 
-    if (!peLoader.loadPE(GetCurrentProcess(), bytes.data())) {
+    if (!peLoader.loadPE(bytes.data())) {
         std::cerr << "Failed loading the PE\n";
         return EXIT_FAILURE;
     }
@@ -36,6 +36,10 @@ int main(int argc, char* argv[]) {
     if (!peLoader.callEntry()) {
         std::cerr << "Failed executing the PE\n";
         return EXIT_FAILURE;
+    }
+
+    if (!peLoader.callExport("sayHello")) {
+        std::cerr << "Failed calling function\n";
     }
 
     std::cout << "Successfully loaded the PE\n";

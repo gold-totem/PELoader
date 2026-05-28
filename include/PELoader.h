@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <optional>
+#include <Windows.h>
 namespace PELdr {
 	class PELoader {
 	public:
@@ -8,7 +9,7 @@ namespace PELdr {
 		bool callEntry();
 		bool callExport(std::string_view funcName);
 	private:
-		
+
 		unsigned char* localBuffer{ nullptr };
 		HANDLE hProc{ nullptr };
 		unsigned char* baseAddress{ nullptr };

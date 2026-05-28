@@ -8,9 +8,7 @@
 #define PCH_H
 
 // add headers that you want to pre-compile here
-
 #include <iostream>
-#include <Windows.h>
 #include "framework.h"
 
 #endif //PCH_H
