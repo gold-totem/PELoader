@@ -115,7 +115,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <LanguageStandard_C>Default</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
