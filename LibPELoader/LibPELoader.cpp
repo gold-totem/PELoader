@@ -258,6 +258,10 @@ bool PELdr::InProcLoader::callEntry() {
 
 bool  PELdr::InProcLoader::callExport(std::string_view funcName) {
     PIMAGE_OPTIONAL_HEADER optionalHeader = reinterpret_cast<PIMAGE_OPTIONAL_HEADER>(&(pNTHeader->OptionalHeader));
+    if(optionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress == NULL) {
+        std::cerr << "The PE does not export any functions\n";
+        return false;
+    }
     PIMAGE_EXPORT_DIRECTORY exportTable = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(baseAddress + optionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
 
     PUINT32 nameArray = reinterpret_cast<PUINT32>(baseAddress + exportTable->AddressOfNames);

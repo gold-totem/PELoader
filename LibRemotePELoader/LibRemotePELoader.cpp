@@ -8,7 +8,7 @@
 namespace {
 
     HMODULE getModuleHandle(std::string_view moduleName, HANDLE hProcess) {
-        DWORD flags = LIST_MODULES_64BIT;
+        DWORD flags = LIST_MODULES_DEFAULT;
 
         DWORD sizeNeeded = 0;
         if (!EnumProcessModulesEx(hProcess, nullptr, 0, &sizeNeeded, flags)) {
@@ -371,8 +371,12 @@ bool PELdr::PELoader::callEntry() {
 
 bool  PELdr::PELoader::callExport(std::string_view funcName) {
     PIMAGE_OPTIONAL_HEADER optionalHeader = reinterpret_cast<PIMAGE_OPTIONAL_HEADER>(&(pNTHeader->OptionalHeader));
-    PIMAGE_EXPORT_DIRECTORY exportTable = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(localBuffer + optionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
 
+    if (optionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress == NULL) {
+        std::cerr << "The PE does not export any functions\n";
+        return false;
+    }
+    PIMAGE_EXPORT_DIRECTORY exportTable = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(localBuffer + optionalHeader->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
     PUINT32 nameArray = reinterpret_cast<PUINT32>(localBuffer + exportTable->AddressOfNames);
 
 
